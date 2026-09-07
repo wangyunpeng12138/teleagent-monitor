@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
-import { getCurrentWindow, getAllWindows } from "@tauri-apps/api/window";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow, getAllWindows, currentMonitor } from "@tauri-apps/api/window";
+import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useMonitor } from "./composables/useMonitor";
 import { useWindowDrag } from "./composables/useWindowDrag";
@@ -115,6 +115,9 @@ async function switchToPanel() {
     await nextTick();
     await fitWindowToContent();
 
+    // 定位到屏幕右侧垂直居中
+    await positionRight();
+
     // 隐藏加速球窗口
     const windows = await getAllWindows();
     const ballWin = windows.find((w) => w.label === "ball");
@@ -168,6 +171,24 @@ async function fitWindowToContent() {
     LOG.info(`[App] 面板窗口尺寸已自适应为 ${w}x${h}`);
   } catch (e) {
     LOG.warn(`[App] 窗口尺寸自适应失败: ${e}`);
+  }
+}
+
+/** 将面板窗口定位到屏幕右侧垂直居中（物理像素） */
+async function positionRight() {
+  try {
+    const win = getCurrentWindow();
+    const mon = await currentMonitor();
+    if (!mon) return;
+    const waPos = mon.workArea?.position || mon.position;
+    const waSize = mon.workArea?.size || mon.size;
+    const winSize = await win.outerSize(); // 物理像素
+    const x = waPos.x + waSize.width - winSize.width;
+    const y = waPos.y + Math.floor((waSize.height - winSize.height) / 2);
+    await win.setPosition(new PhysicalPosition(x, y));
+    LOG.info(`[App] 面板定位至右侧 (${x}, ${y})`);
+  } catch (e) {
+    LOG.warn(`[App] 面板右侧定位失败: ${e}`);
   }
 }
 

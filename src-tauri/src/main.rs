@@ -22,9 +22,41 @@ use log::{info, warn};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
+    Emitter, Manager, PhysicalPosition,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+
+/// 将面板窗口定位到屏幕右侧垂直居中（workArea 右边缘）
+fn position_panel_right(window: &tauri::WebviewWindow) {
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let wa = monitor.work_area();
+        let wa_size = wa.size;
+        let wa_pos = wa.position;
+        let win_size = window.outer_size().unwrap_or_default();
+        let x = wa_pos.x + wa_size.width as i32 - win_size.width as i32;
+        let y = wa_pos.y + (wa_size.height as i32 - win_size.height as i32) / 2;
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+        info!("[window] 面板定位至右侧 ({}, {})", x, y);
+    } else {
+        warn!("[window] 无法获取显示器信息，跳过右侧定位");
+    }
+}
+
+/// 将加速球窗口定位到屏幕右侧垂直居中（workArea 右边缘）
+fn position_ball_right(window: &tauri::WebviewWindow) {
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let wa = monitor.work_area();
+        let wa_size = wa.size;
+        let wa_pos = wa.position;
+        let win_size = window.outer_size().unwrap_or_default();
+        let x = wa_pos.x + wa_size.width as i32 - win_size.width as i32;
+        let y = wa_pos.y + (wa_size.height as i32 - win_size.height as i32) / 2;
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+        info!("[ball] 加速球定位至右侧 ({}, {})", x, y);
+    } else {
+        warn!("[ball] 无法获取显示器信息，跳过右侧定位");
+    }
+}
 
 /// 切换主窗口的显示/隐藏状态
 ///
@@ -40,10 +72,11 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
         let _ = main_win.hide();
         info!("[tray] 窗口已隐藏到托盘");
     } else {
-        // 显示面板前先隐藏加速球（互斥）
+        // 显示面板前先隐藏加速球（互斥），再定位到右侧
         hide_ball_window(app);
         let _ = main_win.show();
         let _ = main_win.set_focus();
+        position_panel_right(&main_win);
         info!("[tray] 窗口已从托盘恢复显示");
     }
 }
@@ -57,14 +90,17 @@ fn hide_ball_window(app: &tauri::AppHandle) {
 }
 
 /// 显示加速球窗口并隐藏面板（互斥）
+/// 加速球定位到屏幕右侧中间偏下
 fn show_ball_window(app: &tauri::AppHandle) {
     if let Some(main_win) = app.get_webview_window("main") {
         let _ = main_win.hide();
     }
     if let Some(ball) = app.get_webview_window("ball") {
+        // 定位到屏幕右侧垂直居中
+        position_ball_right(&ball);
         let _ = ball.show();
         let _ = ball.set_focus();
-        info!("[tray] 加速球窗口已显示");
+        info!("[ball] 加速球窗口已显示");
     }
 }
 
@@ -121,20 +157,22 @@ fn main() {
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
                         "show" => {
-                            // 显示面板，隐藏加速球
+                            // 显示面板，隐藏加速球，定位到右侧
                             hide_ball_window(app);
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
+                                position_panel_right(&window);
                                 info!("[tray] 菜单：显示面板");
                             }
                         }
                         "settings" => {
-                            // 打开设置：显示面板并隐藏加速球
+                            // 打开设置：显示面板并隐藏加速球，定位到右侧
                             hide_ball_window(app);
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
+                                position_panel_right(&window);
                                 // 通知前端打开设置面板
                                 let _ = app.emit("open-settings", ());
                                 info!("[tray] 菜单：打开设置");
