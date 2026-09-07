@@ -19,7 +19,11 @@ const { snapToEdge } = useBallSnap();
 const refreshing = ref(false);
 let dragging = false;
 
-/** 拖拽加速球：仅在非交互格子区域触发 */
+/**
+ * 拖拽加速球：仅在非交互格子区域触发
+ * 注意：startDragging() 返回的 Promise 立即 resolve（不等待拖动结束），
+ * 所以边缘吸附由 onMoved + 防抖实现（见下方监听）
+ */
 async function startDrag(event: MouseEvent) {
   const target = event.target as HTMLElement;
   if (target.closest(".cell")) return; // 交互格子不触发拖拽
@@ -75,22 +79,31 @@ async function onRefresh() {
   }
 }
 
-// 窗口拖动结束后吸附
+// === 边缘吸附：onMoved + 防抖 ===
+// 拖动过程中 onMoved 持续触发，防抖不断重置计时器 → 不会中途吸附
+// 拖动停止 300ms 后判定结束 → 执行吸附
+const SNAP_DEBOUNCE_MS = 300;
+let snapTimer: number | undefined;
 let dragUnlisten: (() => void) | undefined;
 
 onMounted(async () => {
   try {
     const win = getCurrentWindow();
     dragUnlisten = await win.onMoved(async () => {
-      await snapToEdge();
+      if (snapTimer) clearTimeout(snapTimer);
+      snapTimer = window.setTimeout(async () => {
+        LOG.debug("[SpeedBall] 拖动停止，执行边缘吸附");
+        await snapToEdge();
+      }, SNAP_DEBOUNCE_MS);
     });
-    LOG.info("[SpeedBall] 吸附监听已注册");
+    LOG.info("[SpeedBall] 吸附监听已注册（防抖 300ms）");
   } catch (e) {
     LOG.warn(`[SpeedBall] 吸附监听失败: ${e}`);
   }
 });
 
 onUnmounted(() => {
+  if (snapTimer) clearTimeout(snapTimer);
   if (dragUnlisten) {
     dragUnlisten();
     LOG.info("[SpeedBall] 吸附监听已注销");
@@ -176,27 +189,29 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
 }
 
+/* 红绿灯圆点：缩小为 9px（原 26px 的 1/3） */
 .ball-dot {
-  width: 26px;
-  height: 26px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  box-shadow: 0 0 10px currentColor;
+  box-shadow: 0 0 4px currentColor;
   transition: background 0.3s;
 }
 
 .ball-count {
   color: #ddd;
-  font-size: 11px;
+  font-size: 8px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .ball-count.done {
   color: #67c23a;
-  font-size: 12px;
+  font-size: 9px;
 }
 
 /* 红绿灯颜色 */
