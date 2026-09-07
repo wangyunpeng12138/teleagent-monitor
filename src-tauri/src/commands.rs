@@ -6,6 +6,7 @@ use log::{info, warn, error};
 
 use crate::config;
 use crate::db;
+use tauri_plugin_autostart::ManagerExt;
 
 /// 查询所有 running 状态的会话及其 todo
 #[tauri::command]
@@ -128,5 +129,36 @@ pub fn save_config(
 
     config::save_config(&cfg)?;
     info!("[cmd] 配置已保存");
+    Ok(())
+}
+
+/// 查询开机自启动是否已启用
+#[tauri::command]
+pub fn is_autostart_enabled(app: tauri::AppHandle) -> bool {
+    let manager = app.autolaunch();
+    let enabled = manager.is_enabled().unwrap_or(false);
+    info!("[cmd] is_autostart_enabled = {}", enabled);
+    enabled
+}
+
+/// 启用开机自启动
+#[tauri::command]
+pub fn enable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    info!("[cmd] enable_autostart 被调用");
+    app.autolaunch()
+        .enable()
+        .map_err(|e| format!("启用开机自启动失败: {}", e))?;
+    info!("[cmd] 开机自启动已启用");
+    Ok(())
+}
+
+/// 禁用开机自启动
+#[tauri::command]
+pub fn disable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    info!("[cmd] disable_autostart 被调用");
+    app.autolaunch()
+        .disable()
+        .map_err(|e| format!("禁用开机自启动失败: {}", e))?;
+    info!("[cmd] 开机自启动已禁用");
     Ok(())
 }

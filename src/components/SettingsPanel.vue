@@ -14,6 +14,8 @@ const config = ref<AppConfig>({ ...DEFAULT_CONFIG });
 const saving = ref(false);
 const saveMsg = ref("");
 const saveError = ref(false);
+const autostartEnabled = ref(false);
+const autostartToggling = ref(false);
 
 onMounted(async () => {
   try {
@@ -23,7 +25,33 @@ onMounted(async () => {
   } catch (e) {
     LOG.error(`[Settings] 加载配置失败: ${e}`);
   }
+
+  // 加载开机自启动状态
+  try {
+    autostartEnabled.value = await invoke<boolean>("is_autostart_enabled");
+    LOG.info(`[Settings] 开机自启动状态: ${autostartEnabled.value}`);
+  } catch (e) {
+    LOG.error(`[Settings] 查询开机自启动状态失败: ${e}`);
+  }
 });
+
+async function toggleAutostart() {
+  autostartToggling.value = true;
+  try {
+    if (autostartEnabled.value) {
+      await invoke("enable_autostart");
+      LOG.info("[Settings] 开机自启动已开启");
+    } else {
+      await invoke("disable_autostart");
+      LOG.info("[Settings] 开机自启动已关闭");
+    }
+  } catch (e) {
+    LOG.error(`[Settings] 切换开机自启动失败: ${e}`);
+    autostartEnabled.value = !autostartEnabled.value; // 回滚
+  } finally {
+    autostartToggling.value = false;
+  }
+}
 
 async function handleSave() {
   saving.value = true;
@@ -73,6 +101,24 @@ function handleCancel() {
       </div>
 
       <div class="settings-body">
+        <!-- 开机自启动 -->
+        <div class="form-group">
+          <label class="form-label">开机自启动</label>
+          <div class="toggle-row">
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                v-model="autostartEnabled"
+                :disabled="autostartToggling"
+                @change="toggleAutostart"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="toggle-text">{{ autostartEnabled ? "已启用" : "未启用" }}</span>
+          </div>
+          <span class="form-hint">开机时自动启动 TeleAgent Monitor</span>
+        </div>
+
         <!-- TeleAgent 数据目录 -->
         <div class="form-group">
           <label class="form-label">TeleAgent 数据目录</label>
@@ -329,5 +375,69 @@ function handleCancel() {
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.15);
   color: #fff;
+}
+
+/* === 开关组件 === */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  transition: 0.3s;
+}
+
+.toggle-slider:before {
+  content: "";
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: #ccc;
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(64, 158, 255, 0.8);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggle-text {
+  color: #aaa;
+  font-size: 11px;
 }
 </style>

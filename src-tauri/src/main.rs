@@ -24,6 +24,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 /// 切换主窗口的显示/隐藏状态
 ///
@@ -84,6 +85,10 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["com.teleagent.monitor"]),
+        ))
         .setup(|app| {
             info!("[main] Tauri 应用初始化完成");
 
@@ -168,6 +173,18 @@ fn main() {
             show_ball_window(app.handle());
             info!("[main] 启动完成：默认显示加速球窗口");
 
+            // === 开机自启动：首次启动默认启用 ===
+            // 如果当前未启用则自动启用（用户可在设置中关闭）
+            let autostart_manager = app.autolaunch();
+            if !autostart_manager.is_enabled().unwrap_or(false) {
+                match autostart_manager.enable() {
+                    Ok(()) => info!("[main] 开机自启动已默认启用"),
+                    Err(e) => warn!("[main] 开机自启动启用失败: {}", e),
+                }
+            } else {
+                info!("[main] 开机自启动已启用（跳过）");
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -186,6 +203,9 @@ fn main() {
             commands::write_log,
             commands::get_config,
             commands::save_config,
+            commands::is_autostart_enabled,
+            commands::enable_autostart,
+            commands::disable_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 应用启动失败");
