@@ -5,9 +5,10 @@
  * 下格子：红绿灯展示（蓝=运行中 / 黄=需介入 / 绿=空闲）
  * 点击红绿灯 → 通知主窗口切换到面板
  */
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { useMonitor } from "../composables/useMonitor";
 import { useBallSnap } from "../composables/useBallSnap";
 import { LOG } from "../composables/logger";
@@ -89,6 +90,19 @@ let dragUnlisten: (() => void) | undefined;
 onMounted(async () => {
   try {
     const win = getCurrentWindow();
+
+    // 强制窗口尺寸等于 .ball-root 内容尺寸（60x120 逻辑）
+    // WebView2 透明窗口下 outerSize 可能比内容大（实测 202x180 物理 vs 内容 90x180），
+    // 导致边缘吸附时右侧出现透明间隙。setSize 后 outerSize 精确匹配内容。
+    await nextTick();
+    const root = document.querySelector(".ball-root") as HTMLElement;
+    if (root) {
+      const w = root.offsetWidth;
+      const h = root.offsetHeight;
+      await win.setSize(new LogicalSize(w, h));
+      LOG.info(`[SpeedBall] 窗口尺寸已修正为 ${w}x${h}`);
+    }
+
     dragUnlisten = await win.onMoved(async () => {
       if (snapTimer) clearTimeout(snapTimer);
       snapTimer = window.setTimeout(async () => {
@@ -135,10 +149,10 @@ onUnmounted(() => {
   height: 120px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px;
+  gap: 4px;
+  padding: 5px;
   background: rgba(30, 30, 35, 0.75);
-  border-radius: 18px;
+  border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   cursor: grab;
@@ -155,7 +169,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -212,6 +226,17 @@ onUnmounted(() => {
 .ball-count.done {
   color: #67c23a;
   font-size: 9px;
+}
+
+/* === 闪烁动画：运行中(蓝)与需介入(黄)状态 === */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.traffic-light.blue .ball-dot,
+.traffic-light.yellow .ball-dot {
+  animation: pulse 1.2s ease-in-out infinite;
 }
 
 /* 红绿灯颜色 */
