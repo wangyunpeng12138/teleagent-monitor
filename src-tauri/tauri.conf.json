@@ -24,16 +24,26 @@
         "transparent": true,
         "skipTaskbar": true,
         "focus": false,
-        "shadow": false
+        "shadow": false,
+        "visible": false
+      },
+      {
+        "label": "ball",
+        "title": "TeleAgent Ball",
+        "width": 60,
+        "height": 120,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "shadow": false,
+        "visible": false
       }
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "id": "main-tray",
-      "iconPath": "icons/icon.ico",
-      "tooltip": "TeleAgent Monitor"
     }
   },
   "bundle": {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ref, computed, onMounted } from "vue";
+import { getCurrentWindow, getAllWindows } from "@tauri-apps/api/window";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useMonitor } from "./composables/useMonitor";
 import { useWindowDrag } from "./composables/useWindowDrag";
 import { LOG } from "./composables/logger";
@@ -15,6 +16,9 @@ const { startDrag } = useWindowDrag();
 
 // 设置面板
 const showSettings = ref(false);
+
+// 形态切换：'panel' 面板模式 | 'ball' 加速球模式
+const viewMode = ref<"panel" | "ball">("ball");
 
 // 标签过滤
 const activeTag = ref<string>("全部");
@@ -72,12 +76,79 @@ async function onSettingsSaved() {
   await restartPolling();
   await refreshAll();
 }
+
+// === 形态切换 ===
+
+/** 切换到加速球模式：隐藏面板窗口，显示加速球窗口 */
+async function switchToBall() {
+  LOG.info("[App] 切换到加速球模式");
+  viewMode.value = "ball";
+  try {
+    const win = getCurrentWindow();
+    await win.hide();
+
+    // 显示加速球窗口
+    const windows = await getAllWindows();
+    const ballWin = windows.find((w) => w.label === "ball");
+    if (ballWin) {
+      await ballWin.show();
+      LOG.info("[App] 加速球窗口已显示");
+    }
+  } catch (e) {
+    LOG.error(`[App] 切换加速球失败: ${e}`);
+  }
+}
+
+/** 切换到面板模式：显示面板窗口，隐藏加速球窗口 */
+async function switchToPanel() {
+  LOG.info("[App] 切换到面板模式");
+  viewMode.value = "panel";
+  try {
+    const win = getCurrentWindow();
+    await win.show();
+    await win.setFocus();
+
+    // 隐藏加速球窗口
+    const windows = await getAllWindows();
+    const ballWin = windows.find((w) => w.label === "ball");
+    if (ballWin) {
+      await ballWin.hide();
+      LOG.info("[App] 加速球窗口已隐藏");
+    }
+  } catch (e) {
+    LOG.error(`[App] 切换面板失败: ${e}`);
+  }
+}
+
+// 监听托盘"设置"菜单事件 + 加速球"切到面板"事件
+let unlistenSettings: UnlistenFn | undefined;
+let unlistenBallClick: UnlistenFn | undefined;
+
+onMounted(async () => {
+  try {
+    unlistenSettings = await listen("open-settings", () => {
+      showSettings.value = true;
+      LOG.info("[App] 收到托盘设置事件，打开设置面板");
+    });
+  } catch (e) {
+    LOG.warn(`[App] 监听 open-settings 失败: ${e}`);
+  }
+
+  try {
+    unlistenBallClick = await listen("ball-click-panel", async () => {
+      LOG.info("[App] 收到加速球点击事件，切换到面板模式");
+      await switchToPanel();
+    });
+  } catch (e) {
+    LOG.warn(`[App] 监听 ball-click-panel 失败: ${e}`);
+  }
+});
 </script>
 
 <template>
   <div class="container">
     <!-- 标题栏（拖拽区域） -->
-    <div class="title-bar" @mousedown="startDrag">
+    <div class="title-bar" @mousedown="startDrag($event)">
       <div class="title-left">
         <span class="title-icon">{{ agentOnline ? "🤖" : "💤" }}</span>
         <span class="title-text">TeleAgent Monitor</span>
@@ -93,6 +164,7 @@ async function onSettingsSaved() {
         <span class="clock">{{ formatClock(lastUpdated) }}</span>
         <button class="btn-icon" @click.stop="showSettings = true" title="设置">⚙️</button>
         <button class="btn-icon" @click.stop="refreshAll" title="刷新">🔄</button>
+        <button class="btn-icon" @click.stop="switchToBall" title="最小化为加速球">🔵</button>
         <button class="btn-icon btn-close" @click.stop="closeWindow" title="隐藏到托盘">✕</button>
       </div>
     </div>
