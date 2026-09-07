@@ -30,8 +30,8 @@
       {
         "label": "ball",
         "title": "TeleAgent Ball",
-        "width": 60,
-        "height": 120,
+        "width": 40,
+        "height": 100,
         "resizable": false,
         "alwaysOnTop": true,
         "decorations": false,

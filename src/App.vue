@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { getCurrentWindow, getAllWindows } from "@tauri-apps/api/window";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useMonitor } from "./composables/useMonitor";
 import { useWindowDrag } from "./composables/useWindowDrag";
@@ -70,11 +71,13 @@ async function closeWindow() {
   }
 }
 
-/** 设置保存后的处理：重启轮询 + 刷新数据 */
 async function onSettingsSaved() {
   LOG.info("[App] 配置已保存，重启轮询并刷新数据");
   await restartPolling();
   await refreshAll();
+  // 配置可能影响内容数量，重新自适应
+  await nextTick();
+  await fitWindowToContent();
 }
 
 // === 形态切换 ===
@@ -107,6 +110,10 @@ async function switchToPanel() {
     const win = getCurrentWindow();
     await win.show();
     await win.setFocus();
+
+    // 窗口尺寸自适应内容
+    await nextTick();
+    await fitWindowToContent();
 
     // 隐藏加速球窗口
     const windows = await getAllWindows();
@@ -142,6 +149,32 @@ onMounted(async () => {
   } catch (e) {
     LOG.warn(`[App] 监听 ball-click-panel 失败: ${e}`);
   }
+
+  // 窗口尺寸自适应内容：消除透明区域遮挡其他软件
+  // 窗口 transparent + 固定 height 时，内容不足会留出透明区域遮挡桌面
+  await nextTick();
+  fitWindowToContent();
+});
+
+/** 根据内容实际高度调整窗口大小，消除底部透明遮挡 */
+async function fitWindowToContent() {
+  try {
+    const win = getCurrentWindow();
+    const container = document.querySelector(".container") as HTMLElement;
+    if (!container) return;
+    const w = container.offsetWidth;
+    const h = container.offsetHeight;
+    await win.setSize(new LogicalSize(w, h));
+    LOG.info(`[App] 面板窗口尺寸已自适应为 ${w}x${h}`);
+  } catch (e) {
+    LOG.warn(`[App] 窗口尺寸自适应失败: ${e}`);
+  }
+}
+
+// 数据变化后重新自适应窗口高度（初始加载、刷新、标签切换等）
+watch([sessions, jobs, activeTag], async () => {
+  await nextTick();
+  await fitWindowToContent();
 });
 </script>
 
@@ -241,7 +274,7 @@ onMounted(async () => {
 <style scoped>
 .container {
   width: 380px;
-  max-height: 600px;
+  max-height: 100vh;
   background: rgba(30, 30, 35, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -451,7 +484,7 @@ onMounted(async () => {
    会话列表设固定最大高度，内部滚动，
    确保定时任务区块始终在下方可见 */
 .session-scroll {
-  max-height: 320px;
+  max-height: 280px;
   overflow-y: auto;
   padding-right: 2px;
 }

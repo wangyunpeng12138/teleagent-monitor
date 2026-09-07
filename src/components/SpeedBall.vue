@@ -102,7 +102,6 @@ onMounted(async () => {
       await win.setSize(new LogicalSize(w, h));
       LOG.info(`[SpeedBall] 窗口尺寸已修正为 ${w}x${h}`);
     }
-
     dragUnlisten = await win.onMoved(async () => {
       if (snapTimer) clearTimeout(snapTimer);
       snapTimer = window.setTimeout(async () => {
@@ -145,14 +144,14 @@ onUnmounted(() => {
 
 <style scoped>
 .ball-root {
-  width: 60px;
-  height: 120px;
+  width: 40px;
+  height: 100px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 5px;
+  gap: 3px;
+  padding: 4px;
   background: rgba(30, 30, 35, 0.75);
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   cursor: grab;
@@ -169,7 +168,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -183,7 +182,7 @@ onUnmounted(() => {
 }
 
 .refresh-icon {
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -206,7 +205,7 @@ onUnmounted(() => {
   gap: 1px;
 }
 
-/* 红绿灯圆点：缩小为 9px（原 26px 的 1/3） */
+/* 红绿灯圆点：9px */
 .ball-dot {
   width: 9px;
   height: 9px;
@@ -228,15 +227,16 @@ onUnmounted(() => {
   font-size: 9px;
 }
 
-/* === 闪烁动画：运行中(蓝)与需介入(黄)状态 === */
-@keyframes pulse {
+/* === 呼吸闪烁动画：运行中(蓝)与需介入(黄)状态 ===
+   人类呼吸频率 12-16 次/分钟，取 15 次/分钟 = 4 秒/周期 */
+@keyframes breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  50% { opacity: 0.25; }
 }
 
 .traffic-light.blue .ball-dot,
 .traffic-light.yellow .ball-dot {
-  animation: pulse 1.2s ease-in-out infinite;
+  animation: breathe 4s ease-in-out infinite;
 }
 
 /* 红绿灯颜色 */
