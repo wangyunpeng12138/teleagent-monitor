@@ -234,12 +234,14 @@ pub fn get_max_sessions() -> usize {
 }
 
 /// 获取会话轮询间隔（毫秒）
+#[allow(dead_code)]
 pub fn get_session_poll_interval() -> u64 {
     let config = get_config();
     config.session_poll_interval
 }
 
 /// 获取定时任务轮询间隔（毫秒）
+#[allow(dead_code)]
 pub fn get_job_poll_interval() -> u64 {
     let config = get_config();
     config.job_poll_interval

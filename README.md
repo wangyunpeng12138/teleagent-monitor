@@ -1,14 +1,3 @@
----
-AIGC:
-  ContentProducer: '001191110102MAD55U9H0F10002'
-  ContentPropagator: '001191110102MAD55U9H0F10002'
-  Label: '1'
-  ProduceID: '5ce80f37-5bbf-4eb5-8b01-ba7e2b26feb1'
-  PropagateID: '5ce80f37-5bbf-4eb5-8b01-ba7e2b26feb1'
-  ReservedCode1: 'ac2b5134-549b-47da-a646-a68d2d8a4718'
-  ReservedCode2: 'ac2b5134-549b-47da-a646-a68d2d8a4718'
----
-
 # TeleAgent Monitor
 
 TeleAgent 任务状态悬浮窗监控工具。以置顶悬浮窗形式实时展示 TeleAgent 的会话任务进度、定时任务执行状态，支持系统托盘常驻、配置外部化、多 PC 移植。
