@@ -204,7 +204,7 @@ fn directory_to_tag(directory: &str) -> String {
 ///   - title NOT LIKE '%_SYS_%'（排除系统内部会话）
 ///   - time_archived IS NULL OR 0（排除已归档）
 ///   - 不在 deleted-session-ids.json 中
-///   - 最近 15 条
+///   - 所有 active（running/paused）会话必含，其余按最近时间补足
 pub fn fetch_running_sessions() -> Result<Vec<SessionInfo>, String> {
     info!("[db] fetch_recent_sessions 被调用");
 
@@ -218,21 +218,79 @@ pub fn fetch_running_sessions() -> Result<Vec<SessionInfo>, String> {
     let db_path = get_db_path()?;
     let conn = open_db_readonly(&db_path)?;
 
-    // 4. 查询最近的主会话（多取一些，后面过滤已删除的）
+    // 4. 查询候选会话
+    //    active_ids = session-status.json 中标记 running/paused 的会话，
+    //    这些会话必须始终出现在结果中（即使 time_updated 较旧被挤出最近列表），
+    //    否则多个并行任务时，某个任务长时间无消息会导致加速球误判为"全部完成"。
+    let active_ids: Vec<String> = status_map
+        .iter()
+        .filter(|(_, s)| s.as_str() == "running" || s.as_str() == "paused")
+        .map(|(id, _)| id.clone())
+        .collect();
+    info!("[db] status_map 中 active(running/paused) 会话数: {}", active_ids.len());
+
+    let base_where = "parent_id IS NULL
+       AND title NOT LIKE '%_SYS_%'
+       AND (time_archived IS NULL OR time_archived = 0)";
+
+    let mut session_rows: Vec<(String, String, String, i64)> = Vec::new();
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 4a. 查询 active 会话（IN 列表，不受 max_sessions 截断影响）
+    if !active_ids.is_empty() {
+        let placeholders: Vec<&str> = vec!["?"; active_ids.len()];
+        let sql_active = format!(
+            "SELECT id, title, directory, time_updated
+             FROM session
+             WHERE {} AND id IN ({})
+             ORDER BY time_updated DESC",
+            base_where,
+            placeholders.join(",")
+        );
+        let mut stmt = conn
+            .prepare(&sql_active)
+            .map_err(|e| format!("准备 active session 查询失败: {}", e))?;
+
+        let active_rows: Vec<(String, String, String, i64)> = stmt
+            .query_map(rusqlite::params_from_iter(active_ids.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(|e| format!("查询 active session 失败: {}", e))?
+            .filter_map(|r| match r {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    warn!("读取 active session 行失败: {}", e);
+                    None
+                }
+            })
+            .collect();
+
+        for row in active_rows {
+            if !deleted_ids.contains(&row.0) && seen_ids.insert(row.0.clone()) {
+                session_rows.push(row);
+            }
+        }
+        info!("[db] active 会话查询到 {} 条", session_rows.len());
+    }
+
+    // 4b. 补足最近会话（排除已获取的），最多 max_sessions 条
     let query_limit = (config::get_max_sessions() + 5) as i64; // 多取 5 条用于过滤
-    let sql = format!(
+    let sql_recent = format!(
         "SELECT id, title, directory, time_updated
          FROM session
-         WHERE parent_id IS NULL
-           AND title NOT LIKE '%_SYS_%'
-           AND (time_archived IS NULL OR time_archived = 0)
+         WHERE {}
          ORDER BY time_updated DESC
-         LIMIT {}", query_limit);
+         LIMIT {}", base_where, query_limit);
     let mut stmt = conn
-        .prepare(&sql)
+        .prepare(&sql_recent)
         .map_err(|e| format!("准备 session 查询失败: {}", e))?;
 
-    let session_rows: Vec<(String, String, String, i64)> = stmt
+    let recent_rows: Vec<(String, String, String, i64)> = stmt
         .query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -251,28 +309,49 @@ pub fn fetch_running_sessions() -> Result<Vec<SessionInfo>, String> {
         })
         .collect();
 
-    info!("[db] 查询到 {} 条候选 session 记录", session_rows.len());
+    // 合并：active 优先，再按 time_updated DESC 补最近（去重）
+    let mut merged = session_rows;
+    let mut seen = seen_ids;
+    for r in recent_rows {
+        if !deleted_ids.contains(&r.0) && seen.insert(r.0.clone()) {
+            merged.push(r);
+        }
+    }
+    // 按 time_updated 降序排列（active 会话优先）
+    merged.sort_by(|a, b| b.3.cmp(&a.3));
+
+    info!("查询到 {} 条候选 session 记录（含 active 会话）", merged.len());
+    let session_rows = merged;
 
     // 5. 对每个 session 推导状态 + 查询 todo
+    //    active（running/paused）会话必须全部处理（即使超过 max_sessions 也保留），
+    //    其余会话按最近时间补足到 max_sessions。
+    let active_set: std::collections::HashSet<&str> =
+        active_ids.iter().map(|s| s.as_str()).collect();
+
     let mut result = Vec::new();
-    for (session_id, title, directory, updated_at) in &session_rows {
+
+    /// 处理单个会话：推导状态 + 查询 todo + 同步子任务 + 构造 SessionInfo
+    fn build_session_info(
+        conn: &Connection,
+        session_id: &str,
+        title: &str,
+        directory: &str,
+        updated_at: i64,
+        status_map: &std::collections::HashMap<String, String>,
+        deleted_ids: &std::collections::HashSet<String>,
+    ) -> Option<SessionInfo> {
         // 过滤已删除的会话
         if deleted_ids.contains(session_id) {
             info!("[db] 跳过已删除会话: {}", session_id);
-            continue;
-        }
-
-        // 限制最大会话数（从配置读取）
-        let max_sessions = config::get_max_sessions();
-        if result.len() >= max_sessions {
-            break;
+            return None;
         }
 
         // 推导状态
-        let (status, is_definitive) = derive_session_status(&conn, session_id, &status_map);
+        let (status, is_definitive) = derive_session_status(conn, session_id, status_map);
 
         // 查询 todo
-        let mut todos = match fetch_todos_for_session(&conn, session_id) {
+        let mut todos = match fetch_todos_for_session(conn, session_id) {
             Ok(t) => t,
             Err(e) => {
                 warn!("查询 session {} 的 todo 失败: {}", session_id, e);
@@ -297,15 +376,44 @@ pub fn fetch_running_sessions() -> Result<Vec<SessionInfo>, String> {
 
         let tag = directory_to_tag(directory);
 
-        result.push(SessionInfo {
-            session_id: session_id.clone(),
-            title: title.clone(),
-            directory: directory.clone(),
+        Some(SessionInfo {
+            session_id: session_id.to_string(),
+            title: title.to_string(),
+            directory: directory.to_string(),
             tag,
-            updated_at: *updated_at,
+            updated_at,
             status,
             todos,
-        });
+        })
+    }
+
+    // 5a. 先处理 active 会话（不受 max_sessions 截断，全部保留）
+    for (session_id, title, directory, updated_at) in &session_rows {
+        if !active_set.contains(session_id.as_str()) {
+            continue;
+        }
+        if let Some(info) = build_session_info(
+            &conn, session_id, title, directory, *updated_at, &status_map, &deleted_ids,
+        ) {
+            result.push(info);
+        }
+    }
+    info!("[db] active 会话已处理 {} 条", result.len());
+
+    // 5b. 处理其余会话，补足到 max_sessions
+    let max_sessions = config::get_max_sessions();
+    for (session_id, title, directory, updated_at) in &session_rows {
+        if active_set.contains(session_id.as_str()) {
+            continue; // 已处理
+        }
+        if result.len() >= max_sessions {
+            break;
+        }
+        if let Some(info) = build_session_info(
+            &conn, session_id, title, directory, *updated_at, &status_map, &deleted_ids,
+        ) {
+            result.push(info);
+        }
     }
 
     info!("[db] 返回 {} 个会话信息", result.len());
@@ -322,6 +430,13 @@ pub fn fetch_running_sessions() -> Result<Vec<SessionInfo>, String> {
 ///   5. session-status.json 中标记 running 但超时 → completed（崩溃兜底）
 ///   6. 其他情况 → completed
 ///
+/// 重要说明（多任务并行场景）：
+///   session-status.json 是 TeleAgent 维护的权威运行状态。当 TeleAgent 在线时，
+///   一个标记为 running 的会话即使长时间没有新消息（长思考/长文档生成/等待），
+///   也不能误判为 completed —— 否则并行任务中一个完成、另一个仍执行时，
+///   加速球会错误地变成"全部完成"（绿灯）。
+///   因此超时降级仅在 TeleAgent 离线（数据库不可读）时才启用。
+///
 /// 返回 (status, is_definitive)：
 ///   is_definitive=true 表示 finish=stop 确认结束（可安全同步子任务状态）
 ///   is_definitive=false 表示猜测状态（不应破坏子任务原始状态）
@@ -332,10 +447,6 @@ fn derive_session_status(
 ) -> (String, bool) {
     let now = now_ts_millis();
     let stale_threshold_ms = crate::config::get_stale_threshold_ms();
-    info!(
-        "[db] derive_session_status: session={}, stale_threshold={}ms",
-        session_id, stale_threshold_ms
-    );
 
     // 获取最后一条消息的信息（role, finish, timestamp）
     let last_msg = get_last_message_info(conn, session_id);
@@ -359,28 +470,34 @@ fn derive_session_status(
                 None => i64::MAX, // 查不到消息，视为很久以前
             };
 
-            if msg_age > stale_threshold_ms {
-                // 超过阈值没有新消息
+            // TeleAgent 是否在线（数据库可读）
+            let agent_online = check_agent_online();
+
+            if msg_age > stale_threshold_ms && !agent_online {
+                // 超过阈值且 TeleAgent 离线 → 崩溃兜底
                 // paused 超时 → terminated（用户手动终止后未恢复）
                 // running 超时 → completed（崩溃兜底）
                 if s == "paused" {
                     info!(
-                        "[db] 会话 {} status=paused 但最后消息距今 {}ms > {}ms → terminated (手动终止)",
-                        session_id, msg_age, stale_threshold_ms
+                        "[db] 会话 {} status=paused 且 agent 离线 → terminated",
+                        session_id
                     );
                     return ("terminated".to_string(), false);
                 } else {
                     info!(
-                        "[db] 会话 {} status=running 但最后消息距今 {}ms > {}ms → completed (崩溃兜底)",
-                        session_id, msg_age, stale_threshold_ms
+                        "[db] 会话 {} status=running 且 agent 离线 → completed (崩溃兜底)",
+                        session_id
                     );
                     return ("completed".to_string(), false);
                 }
             }
 
-            // 在阈值内，信任 session-status.json
+            // TeleAgent 在线（或消息在阈值内）→ 信任 session-status.json
             if s == "paused" {
-                info!("[db] 会话 {} status=paused 且在阈值内 → needs_human", session_id);
+                info!(
+                    "[db] 会话 {} status=paused → needs_human (agent 在线/阈值内)",
+                    session_id
+                );
                 return ("needs_human".to_string(), false);
             }
 
