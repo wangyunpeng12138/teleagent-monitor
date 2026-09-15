@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '84b228a6-edb4-40b8-a093-f33f6aea0b50'
+  PropagateID: '84b228a6-edb4-40b8-a093-f33f6aea0b50'
+  ReservedCode1: 'f056f544-fdfc-4b6c-bd66-fd9c3d5755da'
+  ReservedCode2: 'f056f544-fdfc-4b6c-bd66-fd9c3d5755da'
+---
+
 # TeleAgent Monitor
 
 TeleAgent 任务状态悬浮窗监控工具。以置顶悬浮窗形式实时展示 TeleAgent 的会话任务进度、定时任务执行状态，支持系统托盘常驻、配置外部化、多 PC 移植。
@@ -193,13 +204,13 @@ npm run tauri build
 
 - **加速球**：竖条小窗，上格刷新按钮、下格红绿灯（蓝=运行中/黄=需介入/绿=空闲），点击红绿灯展开面板，拖动后自动吸附屏幕边缘
 
-  ![image-20260907145240464](images\image-20260907145240464.png)
+  ![image-20260907145240464](images/image-20260907145240464.png)
 
 - **标题栏**：TeleAgent 在线状态 + 运行中/需介入/已终止计数 + 时钟 + 设置/刷新/加速球/关闭按钮
 
 - **会话卡片**：默认折叠显示进度摘要，点击展开查看子任务详情
 
-  ![image-20260907145346669](images\image-20260907145346669.png)
+  ![image-20260907145346669](images/image-20260907145346669.png)
 
 - **状态圆点**：蓝色脉动（运行中）、黄色脉动（需介入）、绿色（已完成）、红色（已终止）
 
