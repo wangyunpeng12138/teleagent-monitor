@@ -45,9 +45,9 @@ pub struct SchedulerJob {
     pub last_session_id: Option<String>,
 }
 
-/// 获取 TeleAgent 用户数据目录（从配置读取）
+/// 获取 TeleAgent 实际运行数据目录（自动适配新旧版本目录布局）
 fn get_teleagent_data_dir() -> Result<PathBuf, String> {
-    config::get_teleagent_data_dir()
+    config::get_runtime_data_dir()
 }
 
 /// 获取 teleagent.db 路径
@@ -61,8 +61,15 @@ fn get_db_path() -> Result<PathBuf, String> {
 }
 
 /// 获取 session-status.json 路径
+/// 新版 TeleAgent 将其放在 <data_dir>/state/ 子目录，旧版在根目录
 fn get_session_status_path() -> Result<PathBuf, String> {
     let dir = get_teleagent_data_dir()?;
+    // 优先新版 state/ 子目录
+    let state_path = dir.join("state").join("session-status.json");
+    if state_path.exists() {
+        return Ok(state_path);
+    }
+    // 回退旧版根目录
     Ok(dir.join("session-status.json"))
 }
 
@@ -78,8 +85,15 @@ fn get_scheduler_db_path() -> Result<PathBuf, String> {
 }
 
 /// 获取 deleted-session-ids.json 路径
+/// 新版：优先放在 state/ 子目录，旧版在根目录
 fn get_deleted_session_ids_path() -> Result<PathBuf, String> {
     let dir = get_teleagent_data_dir()?;
+    // 优先新版 state/ 子目录
+    let state_path = dir.join("state").join("deleted-session-ids.json");
+    if state_path.exists() {
+        return Ok(state_path);
+    }
+    // 回退旧版根目录
     Ok(dir.join("deleted-session-ids.json"))
 }
 

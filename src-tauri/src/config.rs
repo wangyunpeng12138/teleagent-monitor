@@ -221,6 +221,43 @@ pub fn get_teleagent_data_dir() -> Result<PathBuf, String> {
     Ok(data_dir)
 }
 
+/// 获取 TeleAgent 实际运行数据目录（自动适配新旧版本目录布局）
+///
+/// TeleAgent 升级后数据布局发生变化：
+/// - 旧版：`<data_dir>/teleagent.db`、`<data_dir>/session-status.json`
+/// - 新版：`<data_dir>/users/<user_id>/teleagent.db`、`<data_dir>/users/<user_id>/state/session-status.json`
+///
+/// 本函数优先探测新版 users/<user_id> 子目录，探测不到则回退到配置的根目录。
+pub fn get_runtime_data_dir() -> Result<PathBuf, String> {
+    let root = get_teleagent_data_dir()?;
+
+    // 旧版布局：根目录直接有 teleagent.db → 直接使用
+    if root.join("teleagent.db").exists() {
+        return Ok(root);
+    }
+
+    // 新版布局：扫描 users/ 下包含 teleagent.db 的用户子目录
+    let users_dir = root.join("users");
+    if users_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&users_dir) {
+            for entry in entries.flatten() {
+                let user_dir = entry.path();
+                if user_dir.is_dir() && user_dir.join("teleagent.db").exists() {
+                    info!("[config] 探测到新版数据目录: {:?}", user_dir);
+                    return Ok(user_dir);
+                }
+            }
+        }
+    }
+
+    // 都探测不到 → 回退根目录（后续打开 db 时会报更明确的错误）
+    warn!(
+        "[config] 未探测到 teleagent.db（新旧布局均未匹配），回退根目录 {:?}",
+        root
+    );
+    Ok(root)
+}
+
 /// 获取超时阈值（毫秒）
 pub fn get_stale_threshold_ms() -> i64 {
     let config = get_config();
